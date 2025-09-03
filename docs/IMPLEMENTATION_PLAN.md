@@ -22,22 +22,55 @@ An intelligent journaling app that helps users maintain a consistent journaling 
 - Optional daily check-in reminders
 
 ### 3. AI-Powered Features
-- **Dynamic, Empathetic Prompts**
-  - Context-aware journaling prompts based on previous entries
-  - Emotionally intelligent follow-up questions
-  - Personalized prompt suggestions based on user goals
 
-- **Private Sentiment & Theme Analysis**
-  - On-device sentiment analysis of entries
-  - Automatic theme and pattern detection
-  - Visual emotion and mood tracking over time
-  - Private keyword and topic extraction
+#### Dynamic, Empathetic Prompts
+- **Implementation Approach**:
+  - Store entry metadata (emotions, topics, timestamps) for context
+  - Create a prompt generation system that considers:
+    - Recent entry content and sentiment
+    - Time of day and day of week patterns
+    - User's journaling history and preferences
+  - Example prompts:
+    - "How did you find moments of calm today?" (after stress-related entries)
+    - "What's been on your mind since we last spoke?" (after a break in journaling)
+    - "You mentioned [topic] yesterday. How do you feel about it today?"
 
-- **Insightful Reflection Summaries**
-  - Weekly digest of key themes and patterns
-  - Monthly progress reports with insights
-  - Personalized growth recommendations
-  - Milestone celebrations and encouragement
+- **Technical Components**:
+  - Context tracking middleware
+  - Prompt template system
+  - User preference storage
+  - Response analysis for follow-up prompts
+
+#### Private Sentiment & Theme Analysis
+- **Implementation Approach**:
+  - On-device NLP processing using TensorFlow.js
+  - Sentiment analysis with custom emotion detection
+  - Topic modeling for theme extraction
+  - Secure local storage for all analysis data
+
+- **Technical Components**:
+  - TensorFlow.js models for text analysis
+  - Local database for storing analysis results
+  - Privacy-preserving data processing pipeline
+  - Visualization components for trends and patterns
+
+#### Insightful Reflection Summaries
+- **Implementation Approach**:
+  - Weekly/Monthly analysis of journal entries
+  - Pattern recognition for behavior and mood correlations
+  - Personalized insights generation
+  - Actionable recommendations
+
+- **Example Insights**:
+  - "You mentioned feeling most energized on days you had a morning walk"
+  - "Your entries show increased creativity in the evenings"
+  - "You've been consistently practicing gratitude this week"
+
+- **Technical Components**:
+  - Time-series analysis tools
+  - Pattern recognition algorithms
+  - Report generation system
+  - Notification system for insights delivery
 
 ### 4. Dashboard & Analytics
 - Mood and sentiment trends

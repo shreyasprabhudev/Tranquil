@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import type { FieldValues } from 'react-hook-form';
 import * as z from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -56,23 +57,37 @@ const entryTypes = [
 
 const validMoods = ['😊', '😌', '😐', '😢', '😡', '😴', '😨', '😔', '😤', '🤗'];
 
+// Define the schema with required fields
 const formSchema = z.object({
-  title: z.string().min(1, 'Title is required').max(200, 'Title is too long'),
+  title: z.string().min(1, 'Title is required'),
   content: z.string().min(1, 'Content is required'),
   mood: z.string()
     .refine((val) => validMoods.includes(val), {
       message: 'Please select a valid mood',
     })
-    .default('😐'),
-  entry_type: z.string().default('text'),
-  is_private: z.boolean().default(true),
+    .transform(val => val as string), // Ensure string type
+  entry_type: z.string(),
+  is_private: z.boolean(),
   tags: z.string().optional(),
 });
 
-type FormValues = z.infer<typeof formSchema>;
+// Create a type that makes all fields required except for tags
+type FormValues = {
+  title: string;
+  content: string;
+  mood: string;
+  entry_type: string;
+  is_private: boolean;
+  tags?: string;
+};
 
-export function NewEntryForm() {
-  const [open, setOpen] = useState(false);
+interface NewEntryFormProps {
+  onClose: () => void;
+  onNewEntry: (entry: Omit<FormValues, 'tags'> & { word_count: number }) => Promise<void>;
+  open: boolean;
+}
+
+export function NewEntryForm({ onClose, onNewEntry, open }: NewEntryFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { isAuthenticated } = useAuth();
 
@@ -88,63 +103,30 @@ export function NewEntryForm() {
     },
   });
 
-  const onSubmit = async (values: FormValues) => {
+  const onSubmit = async (data: FormValues) => {
     if (!isAuthenticated) {
-      toast.error('Please log in to create a journal entry.');
+      console.error('User not authenticated');
       return;
     }
 
     setIsSubmitting(true);
-
     try {
-      // Get the auth token from localStorage
-      const tokensStr = localStorage.getItem('authTokens');
-      if (!tokensStr) {
-        throw new Error('No authentication token found');
-      }
-      const tokens = JSON.parse(tokensStr);
-
-      // Use the validated mood from form values
-      const moodValue = values.mood;
-      
-      const requestBody = {
-        title: values.title,
-        content: values.content,
-        mood: moodValue,
-        entry_type: values.entry_type,
-        is_private: values.is_private,
-        tags: values.tags ? values.tags.split(',').filter(tag => tag.trim()).map(tag => tag.trim()) : [],
-      };
-
-      console.log('Sending request with body:', JSON.stringify(requestBody, null, 2));
-
-      const response = await fetch('http://localhost:8000/api/entries/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${tokens.access}`,
-        },
-        body: JSON.stringify(requestBody),
+      // Call the parent's onNewEntry handler with the new entry data
+      await onNewEntry({
+        title: data.title,
+        content: data.content,
+        mood: data.mood,
+        entry_type: data.entry_type,
+        is_private: data.is_private,
+        word_count: data.content.split(/\s+/).length,
       });
-
-      const data = await response.json().catch(() => ({}));
-      console.log('Response status:', response.status);
-      console.log('Response data:', data);
-
-      if (!response.ok) {
-        throw new Error(`Failed to create journal entry: ${response.status} ${response.statusText} - ${JSON.stringify(data)}`);
-      }
       
-      toast.success('Your journal entry has been saved.');
-      
-      // Close the dialog and reset the form
-      setOpen(false);
+      // Reset form and close dialog on success
       form.reset();
+      onClose();
       
-      // Refresh the page to show the new entry
-      window.location.reload();
     } catch (error) {
-      console.error('Error creating journal entry:', error);
+      console.error('Error saving entry:', error);
       toast.error('Failed to save journal entry. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -152,18 +134,12 @@ export function NewEntryForm() {
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          New Entry
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>New Journal Entry</DialogTitle>
           <DialogDescription>
-            Take a moment to reflect on your day. What's on your mind?
+            Write about your thoughts, feelings, or experiences.
           </DialogDescription>
         </DialogHeader>
         
@@ -271,7 +247,7 @@ export function NewEntryForm() {
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={() => setOpen(false)}
+                onClick={onClose}
                 disabled={isSubmitting}
               >
                 Cancel
