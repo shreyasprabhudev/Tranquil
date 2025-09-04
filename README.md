@@ -11,7 +11,7 @@ Tranquil is a modern, AI-powered journaling application designed to help users r
 - **Responsive Design**: Seamless experience across all devices
 
 ## 🎥 Video Presentation
-[Insert YouTube/Vimeo link here]
+[Demo Video](https://www.loom.com/share/bdec9684c9654a39a04c83ef2996167f?sid=dc6fbf8e-7b0d-4ad0-a51a-8b07ca649de7)
 
 ## 🏗️ Tech Stack
 
@@ -19,12 +19,11 @@ Tranquil is a modern, AI-powered journaling application designed to help users r
 - **Framework**: Next.js 13+ with App Router
 - **UI**: ShadCN/UI with Tailwind CSS
 - **State Management**: React Context API
-- **Form Handling**: React Hook Form with Zod validation
 - **Authentication**: Custom JWT-based auth with refresh tokens
 
 ### Backend
 - **Framework**: Django REST Framework
-- **Database**: SQLite (development), PostgreSQL (production)
+- **Database**: SQLite (development)
 - **Authentication**: Custom JWT authentication
 - **AI/ML**: Sentiment analysis and prompt generation
 
@@ -69,17 +68,16 @@ Tranquil is a modern, AI-powered journaling application designed to help users r
 
 ## 🖼️ Screenshots
 
-### Dashboard
+### Home Page
+<img width="2003" height="1180" alt="Screenshot 2025-09-04 at 4 00 19 PM" src="https://github.com/user-attachments/assets/3e03c128-26be-4f0d-8a7a-49caf9e2a077" />
+
+### Chat
 <!-- Add dashboard screenshot here -->
-![Dashboard](/screenshots/dashboard.png)
+<img width="2019" height="1172" alt="Screenshot 2025-09-04 at 4 00 02 PM" src="https://github.com/user-attachments/assets/e529e1cb-c8d2-4271-95e3-241d50d3f9c4" />
 
 ### Journal Entry
 <!-- Add journal entry screenshot here -->
-![Journal Entry](/screenshots/journal-entry.png)
-
-### Mood Insights
-<!-- Add mood insights screenshot here -->
-![Mood Insights](/screenshots/mood-insights.png)
+<img width="2008" height="1133" alt="Screenshot 2025-09-04 at 3 59 47 PM" src="https://github.com/user-attachments/assets/ca9809dd-fd37-42e7-ba95-dc0f913f62c5" />
 
 ## 🧩 Features in Detail
 
