@@ -59,7 +59,7 @@ export default function RegisterPage() {
     }
     
     try {
-      const result = await register(username, email, password);
+      const result = await register(email, username, password, confirmPassword);
       if (result.success) {
         // Redirect to the intended URL or default to /chat
         const redirectTo = sessionStorage.getItem('redirectAfterLogin') || '/chat';

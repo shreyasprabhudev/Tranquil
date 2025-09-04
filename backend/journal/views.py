@@ -78,6 +78,70 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set the user to the current user when creating a new entry."""
         serializer.save(user=self.request.user)
+        
+    def update(self, request, *args, **kwargs):
+        """
+        Update a journal entry.
+        Only the owner can update their own entries.
+        """
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        
+        # Ensure the entry belongs to the current user
+        if instance.user != request.user:
+            return Response(
+                {"detail": "Not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+            
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        logger.info(f"Successfully updated entry {instance.id}")
+        return Response(serializer.data)
+        
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a journal entry.
+        Only the owner can delete their own entries.
+        Returns 204 if deleted, 404 if not found, 200 if already deleted.
+        """
+        entry_id = kwargs.get('pk')
+        logger.info(f"DELETE request for entry {entry_id} from user {request.user.id}")
+        
+        # First check if the entry exists and belongs to the user
+        entry_exists = self.get_queryset().filter(pk=entry_id).exists()
+        
+        if not entry_exists:
+            # Check if the entry exists at all (even if not owned by user)
+            entry_anywhere = JournalEntry.objects.filter(pk=entry_id).exists()
+            if not entry_anywhere:
+                logger.info(f"Entry {entry_id} not found, treating as success")
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            else:
+                logger.warning(f"Entry {entry_id} exists but not owned by user {request.user.id}")
+                return Response(
+                    {"detail": "Not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        try:
+            # If we get here, the entry exists and belongs to the user
+            response = super().destroy(request, *args, **kwargs)
+            logger.info(f"Successfully deleted entry {entry_id}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error deleting entry {entry_id}: {str(e)}", exc_info=True)
+            return Response(
+                {"detail": "An error occurred while processing your request."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            
+    def perform_destroy(self, instance):
+        """Perform the actual deletion of the instance."""
+        instance.delete()
     
     @action(detail=False, methods=['get'])
     def recent(self, request):

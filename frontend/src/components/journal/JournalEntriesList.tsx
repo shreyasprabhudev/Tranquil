@@ -1,8 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useContext } from 'react';
+import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+const safeFormatDate = (dateString: string | null | undefined): string => {
+  if (!dateString) return 'No date';
+  try {
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? 'Invalid date' : format(date, 'MMM d, yyyy');
+  } catch (error) {
+    return 'Invalid date';
+  }
+};
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2, Heart, Plus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,14 +38,20 @@ interface JournalEntriesListProps {
   loading: boolean;
   error: string | null;
   onDelete: (id: number) => void;
-  token: string | null;
 }
 
-export function JournalEntriesList({ entries, loading, error, onDelete, token }: JournalEntriesListProps) {
+export function JournalEntriesList({ entries, loading, error, onDelete }: JournalEntriesListProps) {
+  const { token, isAuthenticated } = useAuth();
+  const router = useRouter();
 
   const handleDelete = async (id: number) => {
-    if (!token) {
+    if (!token || !isAuthenticated) {
       console.error('No token available for delete operation');
+      toast.error('Your session has expired. Please log in again.');
+      // Redirect to login after a short delay
+      setTimeout(() => {
+        router.push('/login');
+      }, 1500);
       return;
     }
     if (!window.confirm('Are you sure you want to delete this entry?')) {
@@ -41,7 +59,8 @@ export function JournalEntriesList({ entries, loading, error, onDelete, token }:
     }
 
     try {
-      const response = await fetch(`http://localhost:8000/api/entries/${id}/`, {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/entries/${id}/`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -49,15 +68,23 @@ export function JournalEntriesList({ entries, loading, error, onDelete, token }:
         },
       });
 
+      if (response.status === 401) {
+        // Token might be expired, redirect to login
+        toast.error('Your session has expired. Please log in again.');
+        router.push('/login');
+        return;
+      }
+      
       if (!response.ok) {
-        throw new Error('Failed to delete entry');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to delete entry');
       }
 
       // Call the parent's onDelete handler to update the state
       onDelete(id);
     } catch (err) {
       console.error('Error deleting journal entry:', err);
-      alert('Failed to delete entry. Please try again.');
+      toast.error(err.message || 'Failed to delete entry. Please try again.');
     }
   };
 
@@ -123,7 +150,7 @@ export function JournalEntriesList({ entries, loading, error, onDelete, token }:
                 </CardTitle>
                 <div className="flex items-center text-sm text-muted-foreground mt-1">
                   <span className="mr-4">
-                    {format(new Date(entry.created_at), 'MMM d, yyyy')}
+                    {safeFormatDate(entry.created_at)}
                   </span>
                   {entry.entry_type && (
                     <span className="px-2 py-0.5 text-xs rounded-full bg-secondary text-secondary-foreground">

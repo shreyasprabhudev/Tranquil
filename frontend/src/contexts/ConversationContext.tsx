@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { Conversation, Message as MessageType } from '@/lib/api/conversation';
 import * as conversationAPI from '@/lib/api/conversation';
 import { useAuth } from './AuthContext';
@@ -37,17 +37,31 @@ export const ConversationProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const { token } = useAuth();
 
+  // Cleanup function to abort any pending requests when component unmounts
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   // Load conversations from backend
-  const loadConversations = async () => {
+  const loadConversations = async (signal?: AbortSignal) => {
     if (!token) return [];
     
     try {
-      const data = await conversationAPI.getConversations(showArchived, token);
+      const data = await conversationAPI.getConversations(showArchived, token, signal);
       return data;
     } catch (err) {
+      if (err.name === 'AbortError') {
+        console.log('Load conversations was aborted');
+        return [];
+      }
       console.error('Failed to load conversations:', err);
       setError('Failed to load conversations');
       return [];
@@ -134,12 +148,37 @@ export const ConversationProvider: React.FC<{ children: ReactNode }> = ({ childr
       return;
     }
     
+    // Abort any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
     try {
       console.log(`Switching to conversation ${conversationId}...`);
       setIsLoading(true);
+      setError(null);
       
-      // Get the latest conversation data from the server
-      const { conversation, messages } = await conversationAPI.getConversation(conversationId, token);
+      // Get the latest conversation data from the server with timeout
+      const timeoutId = setTimeout(() => {
+        controller.abort('Request timed out after 10 seconds');
+      }, 10000);
+      
+      const { conversation, messages } = await conversationAPI.getConversation(
+        conversationId, 
+        token, 
+        controller.signal
+      );
+      
+      clearTimeout(timeoutId);
+      
+      // Check if the request was aborted after the fetch but before state updates
+      if (controller.signal.aborted) {
+        return;
+      }
       
       console.log(`Received ${messages.length} messages for conversation ${conversationId}`);
       
@@ -155,12 +194,19 @@ export const ConversationProvider: React.FC<{ children: ReactNode }> = ({ childr
         console.log(`Updated conversations list with ${updated.length} conversations`);
         return updated;
       });
+      
     } catch (err) {
-      setError('Failed to switch conversation');
-      console.error(err);
+      // Don't set error state if the request was aborted
+      if (err.name !== 'AbortError') {
+        setError('Failed to switch conversation');
+        console.error('Error switching conversation:', err);
+      }
       throw err;
     } finally {
-      setIsLoading(false);
+      // Only clear the loading state if this wasn't aborted for a new request
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -258,17 +304,29 @@ export const ConversationProvider: React.FC<{ children: ReactNode }> = ({ childr
       console.log('Cannot send message - missing conversation or token');
       return;
     }
-    if (isSending) {
-      console.log('Already sending a message, ignoring new request');
-      return;
+    
+    // Abort any existing send message request
+    if (abortControllerRef.current) {
+      console.log('Aborting previous message request');
+      abortControllerRef.current.abort();
     }
     
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
+    // Set a timeout to abort the request if it takes too long
+    const timeoutId = setTimeout(() => {
+      console.log('Message request timed out');
+      controller.abort('Request timed out after 30 seconds');
+    }, 30000);
+    
     const userMessageId = `temp-user-${Date.now()}`;
-    const assistantMessageId = `temp-assistant-${Date.now()}`;
     
     try {
       console.log('Setting isSending to true');
       setIsSending(true);
+      setError(null);
       
       // Create user message
       console.log('Creating user message with ID:', userMessageId);
@@ -289,34 +347,48 @@ export const ConversationProvider: React.FC<{ children: ReactNode }> = ({ childr
       };
       
       // Add user message and typing indicator to UI immediately
-      setMessages(prev => {
-        const currentMessages = Array.isArray(prev) ? [...prev] : [];
-        // Remove any existing typing indicator
-        const filteredMessages = currentMessages.filter(m => m.id !== 'typing-indicator');
-        const newMessages = [...filteredMessages, userMessage, typingIndicator];
-        console.log('Setting messages (1/3) - adding user message and typing indicator:', newMessages);
-        return newMessages;
-      });
+      setMessages(prev => [...prev, userMessage, typingIndicator]);
       
-      // Send message to the API
-      console.log('Sending message to API...');
-      const response = await conversationAPI.sendMessage(
-        currentConversation.id, 
+      console.log('Sending message to server...');
+      const { assistant_message, conversation: updatedConversation } = await conversationAPI.sendMessage(
+        currentConversation.id,
         content,
-        token
+        token,
+        controller.signal
       );
       
-      console.log('API Response:', response);
+      // Clear the timeout since the request completed
+      clearTimeout(timeoutId);
       
-      // Process the response from the API
-      const { user_message, assistant_message, conversation: updatedConversation } = response;
-      
-      if (!updatedConversation) {
-        throw new Error('No conversation data in response');
+      // Check if the request was aborted after the fetch but before state updates
+      if (controller.signal.aborted) {
+        console.log('Request was aborted after fetch');
+        return;
       }
       
-      // Update the current conversation with the latest data
+      console.log('Received assistant message:', assistant_message);
+      
+      // Update the conversation with the server response
       setCurrentConversation(updatedConversation);
+      
+      // Replace the temporary message with the one from the server
+      setMessages(prev => {
+        // Remove typing indicator and temporary user message
+        const filtered = prev.filter(msg => 
+          msg.id !== 'typing-indicator' && 
+          !msg.id.startsWith('temp-')
+        );
+        
+        // Add the final user message and assistant response
+        return [
+          ...filtered,
+          {
+            ...userMessage,
+            id: `user-${Date.now()}` // Replace temp ID with a proper one
+          },
+          assistant_message
+        ];
+      });
       
       // Update the conversation in the list
       setConversations(prev => 
@@ -325,53 +397,32 @@ export const ConversationProvider: React.FC<{ children: ReactNode }> = ({ childr
         )
       );
       
-      // Create a default assistant message if none was provided
-      const safeAssistantMessage = assistant_message || {
-        id: `temp-assistant-${Date.now()}`,
-        role: 'assistant' as const,
-        content: 'I apologize, but I encountered an issue generating a response. Please try again.',
-        created_at: new Date().toISOString(),
-      };
-      
-      // Ensure we have a valid user message
-      const safeUserMessage = user_message || {
-        id: `temp-user-${Date.now()}`,
-        role: 'user' as const,
-        content: content,
-        created_at: new Date().toISOString(),
-      };
-      
-      // Update the messages in the UI
-      setMessages(prev => {
-        const currentMessages = Array.isArray(prev) ? [...prev] : [];
-        // Remove typing indicator and any temporary messages
-        const filteredMessages = currentMessages.filter(
-          m => m.id !== 'typing-indicator' && 
-               !m.id.startsWith('temp-')
-        );
-        
-        // Add the user message and assistant response
-        return [
-          ...filteredMessages,
-          safeUserMessage,
-          safeAssistantMessage
-        ];
-      });
-      
-      return response;
     } catch (err) {
-      console.error('Failed to send message:', err);
-      setError('Failed to send message');
+      // Don't show error if the request was aborted
+      if (err.name !== 'AbortError') {
+        console.error('Failed to send message:', err);
+        setError('Failed to send message. Please try again.');
+        
+        // Remove the temporary messages and typing indicator on error
+        setMessages(prev => 
+          prev.filter(msg => 
+            !msg.id.startsWith('temp-') && 
+            msg.id !== 'typing-indicator'
+          )
+        );
+      } else {
+        console.log('Message sending was aborted');
+      }
       
-      // Revert the optimistic update on error
-      setMessages(prev => {
-        const currentMessages = Array.isArray(prev) ? prev : [];
-        return currentMessages.filter(m => m.id !== userMessageId && m.id !== 'typing-indicator');
-      });
-      
+      // Re-throw the error so the UI can handle it if needed
       throw err;
     } finally {
-      setIsSending(false);
+      // Only clear the sending state if this wasn't aborted for a new request
+      if (abortControllerRef.current === controller) {
+        console.log('Clearing isSending state');
+        setIsSending(false);
+      }
+      clearTimeout(timeoutId);
     }
   };
 

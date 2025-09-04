@@ -44,12 +44,17 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
-export const getConversations = async (archived = false, token: string | null): Promise<Conversation[]> => {
+export const getConversations = async (
+  archived = false, 
+  token: string | null, 
+  signal?: AbortSignal
+): Promise<Conversation[]> => {
   try {
     const response = await fetch(
       `${API_BASE_URL}/api/conversations/?archived=${archived}`,
       {
         headers: getAuthHeaders(token),
+        signal,
         cache: 'no-store' // Prevent caching to always get fresh data
       }
     );
@@ -78,15 +83,25 @@ export const getConversations = async (archived = false, token: string | null): 
 /**
  * Fetches a conversation and all its messages
  */
-export const getConversation = async (id: string, token: string | null): Promise<{ conversation: Conversation; messages: Message[] }> => {
+export const getConversation = async (
+  id: string,
+  token: string | null,
+  signal?: AbortSignal
+): Promise<{ conversation: Conversation; messages: Message[] }> => {
   try {
     console.log(`Fetching conversation ${id}...`);
     
     // Get the conversation details
-    const conversationResponse = await fetch(`${API_BASE_URL}/api/conversations/${id}/`, {
-      headers: getAuthHeaders(token),
-      cache: 'no-store' // Prevent caching
-    });
+    const [conversationResponse, messagesResponse] = await Promise.all([
+      fetch(`${API_BASE_URL}/api/conversations/${id}/`, {
+        headers: getAuthHeaders(token),
+        signal,
+      }),
+      fetch(`${API_BASE_URL}/api/conversations/${id}/messages/`, {
+        headers: getAuthHeaders(token),
+        signal,
+      }),
+    ]);
 
     if (!conversationResponse.ok) {
       const errorData = await conversationResponse.json().catch(() => ({}));
@@ -109,7 +124,7 @@ export const getConversation = async (id: string, token: string | null): Promise
     } else {
       // Fall back to fetching messages separately if not included
       console.log('Fetching messages separately...');
-      messages = await getMessages(id, token);
+      messages = await getMessages(id, token, signal);
     }
 
     console.log(`Returning ${messages.length} messages for conversation ${id}`);
@@ -124,20 +139,23 @@ export const getConversation = async (id: string, token: string | null): Promise
   }
 };
 
-export const createConversation = async (data: CreateConversationData = {}, token: string | null): Promise<Conversation> => {
+export const createConversation = async (
+  data: CreateConversationData = {},
+  token: string | null,
+  signal?: AbortSignal
+): Promise<Conversation> => {
   try {
     // Prepare the request body
     const requestBody = {
       title: data.title || 'New Conversation',
-      is_archived: false
+      is_archived: false,
+      initial_message: data.initialMessage,
     };
 
     const response = await fetch(`${API_BASE_URL}/api/conversations/`, {
       method: 'POST',
-      headers: {
-        ...getAuthHeaders(token),
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(token),
+      signal,
       body: JSON.stringify(requestBody),
     });
 
@@ -164,9 +182,9 @@ export const createConversation = async (data: CreateConversationData = {}, toke
     
     // If there's an initial message, send it as a separate request
     if (data.initialMessage) {
-      await sendMessage(conversation.id, data.initialMessage, token);
+      await sendMessage(conversation.id, data.initialMessage, token, signal);
       // Refetch the conversation to get the updated message count
-      return getConversation(conversation.id, token).then(res => res.conversation);
+      return getConversation(conversation.id, token, signal).then(res => res.conversation);
     }
     
     return conversation;
@@ -176,10 +194,16 @@ export const createConversation = async (data: CreateConversationData = {}, toke
   }
 };
 
-export const updateConversation = async (id: string, data: Partial<Conversation>, token: string | null): Promise<Conversation> => {
+export const updateConversation = async (
+  id: string,
+  data: Partial<Conversation>,
+  token: string | null,
+  signal?: AbortSignal
+): Promise<Conversation> => {
   const response = await fetch(`${API_BASE_URL}/api/conversations/${id}/`, {
     method: 'PATCH',
     headers: getAuthHeaders(token),
+    signal,
     body: JSON.stringify(data),
   });
 
@@ -190,10 +214,15 @@ export const updateConversation = async (id: string, data: Partial<Conversation>
   return response.json();
 };
 
-export const deleteConversation = async (id: string, token: string | null): Promise<void> => {
+export const deleteConversation = async (
+  id: string,
+  token: string | null,
+  signal?: AbortSignal
+): Promise<void> => {
   const response = await fetch(`${API_BASE_URL}/api/conversations/${id}/`, {
     method: 'DELETE',
-    headers: getAuthHeaders(token)
+    headers: getAuthHeaders(token),
+    signal,
   });
 
   if (!response.ok) {
@@ -213,7 +242,12 @@ export interface MessageResponse {
   conversation: Conversation;
 }
 
-export const sendMessage = async (conversationId: string, content: string, token: string | null): Promise<MessageResponse> => {
+export const sendMessage = async (
+  conversationId: string,
+  content: string,
+  token: string | null,
+  signal?: AbortSignal
+): Promise<MessageResponse> => {
   try {
     console.log(`Sending message to conversation ${conversationId}:`, content);
     
@@ -226,6 +260,7 @@ export const sendMessage = async (conversationId: string, content: string, token
           ...getAuthHeaders(token),
           'Content-Type': 'application/json'
         },
+        signal,
         body: JSON.stringify({ 
           message: content,
           conversation_id: conversationId,
@@ -292,6 +327,7 @@ export const sendMessage = async (conversationId: string, content: string, token
       `${API_BASE_URL}/api/conversations/${conversationId}/`,
       {
         headers: getAuthHeaders(token),
+        signal,
         cache: 'no-store'
       }
     );
@@ -314,6 +350,7 @@ export const sendMessage = async (conversationId: string, content: string, token
       `${API_BASE_URL}/api/conversations/${conversationId}/messages/`,
       {
         headers: getAuthHeaders(token),
+        signal,
         cache: 'no-store'
       }
     );
@@ -351,7 +388,11 @@ export const sendMessage = async (conversationId: string, content: string, token
 /**
  * Fetches all messages for a conversation, handling pagination
  */
-export const getMessages = async (conversationId: string, token: string | null): Promise<Message[]> => {
+export const getMessages = async (
+  conversationId: string,
+  token: string | null,
+  signal?: AbortSignal
+): Promise<Message[]> => {
   try {
     let allMessages: Message[] = [];
     let nextUrl: string | null = `${API_BASE_URL}/api/conversations/${conversationId}/messages/`;
@@ -360,6 +401,7 @@ export const getMessages = async (conversationId: string, token: string | null):
     while (nextUrl) {
       const response = await fetch(nextUrl, {
         headers: getAuthHeaders(token),
+        signal,
         cache: 'no-store' // Prevent caching
       });
 

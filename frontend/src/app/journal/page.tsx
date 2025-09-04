@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Search } from 'lucide-react';
@@ -12,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { JournalEntriesList } from "@/components/journal/JournalEntriesList"
 import { NewEntryForm } from "@/components/journal/NewEntryForm"
 import { SentimentInsights } from "@/components/journal/SentimentInsights"
-import { BarChart3, RotateCw } from "lucide-react"
+import { BarChart3, Trash2 } from "lucide-react"
 
 // Types
 type JournalEntry = {
@@ -38,8 +39,9 @@ type TabType = 'entries' | 'insights' | 'chat';
 
 function JournalPage() {
   // State
-  const [activeTab, setActiveTab] = useState<TabType>('chat');
+  const [activeTab, setActiveTab] = useState<TabType>('entries');
   const [showNewEntryForm, setShowNewEntryForm] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,19 +49,52 @@ function JournalPage() {
   const { isAuthenticated } = useAuth();
   const [token, setToken] = useState<string | null>(null);
   
-  // Set token from localStorage on mount
+  // AbortController for cancelling in-flight requests
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Set token from localStorage on mount and set up cleanup
   useEffect(() => {
     const storedToken = localStorage.getItem('authToken');
     if (storedToken) {
       setToken(storedToken);
     }
+
+    // Cleanup function to abort any pending requests
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   // Fetch entries when token changes
   useEffect(() => {
-    if (token) {
-      fetchEntries();
+    if (!token) return;
+    
+    // Abort any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
+    const fetchData = async () => {
+      try {
+        await fetchEntries(controller.signal);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('Error fetching entries:', err);
+          setError('Failed to load journal entries');
+        }
+      }
+    };
+    
+    fetchData();
+    
+    return () => {
+      controller.abort();
+    };
   }, [token]);
   
   // Derived state
@@ -76,94 +111,314 @@ function JournalPage() {
   );
 
   // Handlers
-  const handleDeleteEntry = async (id: number) => {
-    const entryToDelete = entries.find(entry => entry.id === id);
-    if (!entryToDelete) return;
+  const handleDeleteAllEntries = async () => {
+    if (!token) {
+      alert('Authentication error. Please refresh the page and try again.');
+      return;
+    }
+    
+    if (!window.confirm('Are you sure you want to delete ALL journal entries? This cannot be undone.')) {
+      return;
+    }
+
+    // Abort any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
+    setLoading(true);
     
     try {
-      const response = await fetch(`/api/journal/entries/${id}`, {
+      let allEntries: JournalEntry[] = [];
+      let nextUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/entries/`;
+      
+      // Fetch all pages of entries
+      while (nextUrl) {
+        const response = await fetch(nextUrl, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+        
+        if (!response.ok) throw new Error('Failed to fetch entries');
+        
+        const data = await response.json();
+        
+        // Add the current page of entries to our list
+        if (data.results) {
+          allEntries = [...allEntries, ...data.results];
+        } else if (Array.isArray(data)) {
+          allEntries = [...allEntries, ...data];
+        } else {
+          allEntries = [...allEntries, data];
+        }
+        
+        // Check for next page URL in the response
+        nextUrl = data.next || '';
+      }
+      
+      if (allEntries.length === 0) {
+        toast.info('No entries to delete');
+        return;
+      }
+      
+      // Delete entries in batches to avoid overwhelming the server
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < allEntries.length; i += BATCH_SIZE) {
+        if (controller.signal.aborted) return;
+        
+        const batch = allEntries.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map((entry: JournalEntry) => 
+          fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/entries/${entry.id}/`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+            signal: controller.signal,
+          }).then(response => {
+            if (response.status === 401) {
+              throw new Error('Authentication failed');
+            }
+            if (!response.ok) {
+              throw new Error(`Failed to delete entry ${entry.id}`);
+            }
+            return response;
+          })
+        ));
+        
+        // Small delay between batches
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      setEntries([]);
+      
+      // Reset stats
+      const emptyStats = {
+        total_entries: 0,
+        total_words: 0,
+        mood_distribution: [],
+        type_distribution: []
+      };
+      setStats(emptyStats);
+      
+      // Refresh from server to ensure consistency
+      await fetchEntries();
+      
+      toast.success(`Successfully deleted ${allEntries.length} entries`);
+    } catch (err) {
+      console.error('Error deleting entries:', err);
+      toast.error('Failed to delete entries. Please try again.');
+      // Refresh from server to recover from any partial deletions
+      fetchEntries();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteEntry = async (id: number) => {
+    if (!token) {
+      console.error('No authentication token available');
+      toast.error('Authentication error. Please refresh the page and try again.');
+      return;
+    }
+    
+    // Save the current state for potential rollback
+    const previousEntries = [...entries];
+    const previousStats = { ...stats };
+    
+    // Find the entry being deleted
+    const deletedEntry = entries.find(entry => entry.id === id);
+    if (!deletedEntry) {
+      console.error('Entry not found for deletion:', id);
+      return;
+    }
+    
+    // Optimistically update the UI
+    const updatedEntries = entries.filter(entry => entry.id !== id);
+    setEntries(updatedEntries);
+    
+    // Update stats optimistically
+    const updatedMoodDist = updateMoodDistribution(stats.mood_distribution, deletedEntry.mood, 'decrement');
+    const updatedTypeDist = stats.type_distribution.map(item => 
+      item.entry_type === deletedEntry.entry_type 
+        ? { ...item, count: Math.max(0, item.count - 1) } 
+        : item
+    );
+    
+    const updatedStats = {
+      ...stats,
+      total_entries: Math.max(0, stats.total_entries - 1),
+      total_words: Math.max(0, stats.total_words - (deletedEntry.word_count || 0)),
+      mood_distribution: updatedMoodDist.filter(mood => mood.count > 0),
+      type_distribution: updatedTypeDist.filter(type => type.count > 0)
+    };
+    setStats(updatedStats);
+    
+    // Create a new AbortController for this request
+    const controller = new AbortController();
+    
+    try {
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/entries/${id}/`;
+      const response = await fetch(apiUrl, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to delete entry');
+      // Handle authentication errors
+      if (response.status === 401) {
+        console.error('Authentication failed, refreshing page...');
+        window.location.reload();
+        return;
       }
       
-      // Update local state
-      const deletedEntry = entries.find(entry => entry.id === id);
-      if (deletedEntry) {
-        setEntries(prev => prev.filter(entry => entry.id !== id));
-        
-        // Update stats
-        setStats(prev => ({
-          ...prev,
-          total_entries: prev.total_entries - 1,
-          total_words: Math.max(0, prev.total_words - (deletedEntry.word_count || 0)),
-          mood_distribution: updateMoodDistribution(prev.mood_distribution, deletedEntry.mood, 'decrement'),
-          type_distribution: prev.type_distribution.map(item => 
-            item.entry_type === deletedEntry.entry_type 
-              ? { ...item, count: Math.max(0, item.count - 1) } 
-              : item
-          )
-        }));
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to delete entry');
       }
+      
+      // Show success message
+      toast.success('Entry deleted successfully', {
+        duration: 3000,
+      });
       
     } catch (err) {
+      // Don't revert if the request was aborted (component unmounted)
+      if (err.name === 'AbortError') return;
+      
+      // Revert to previous state on error
+      setEntries(previousEntries);
+      setStats(previousStats);
+      
       console.error('Error deleting entry:', err);
-      setError('Failed to delete entry. Please try again.');
+      toast.error(err.message || 'Failed to delete entry. Please try again.', {
+        duration: 5000,
+      });
+    } finally {
+      // Clean up the AbortController
+      controller.abort();
     }
   };
   
-  const handleNewEntry = async (newEntry: Omit<JournalEntry, 'id' | 'created_at' | 'updated_at' | 'word_count'>) => {
+  const handleUpdateEntry = async (id: number, updatedData: Partial<JournalEntry>) => {
     if (!token) return;
     
+    // Save the current state for potential rollback
+    const previousEntries = [...entries];
+    const previousStats = { ...stats };
+    
+    // Optimistically update the UI
+    const updatedEntries = entries.map(entry => 
+      entry.id === id ? { ...entry, ...updatedData, updated_at: new Date().toISOString() } : entry
+    );
+    setEntries(updatedEntries);
+    
     try {
-      const response = await fetch('http://localhost:8000/api/entries/', {
-        method: 'POST',
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/entries/${id}/`, {
+        method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...newEntry,
-          word_count: newEntry.content.split(/\s+/).length,
-        }),
+        body: JSON.stringify(updatedData),
       });
       
       if (!response.ok) {
-        throw new Error('Failed to create entry');
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const createdEntry = await response.json();
+      const updatedEntry = await response.json();
       
-      // Update local state
-      setEntries(prev => [createdEntry, ...prev]);
+      // Update the entry with the server response
+      setEntries(prevEntries => 
+        prevEntries.map(entry => 
+          entry.id === id ? { ...entry, ...updatedEntry } : entry
+        )
+      );
       
-      // Update stats
-      setStats(prev => ({
-        ...prev,
-        total_entries: prev.total_entries + 1,
-        total_words: prev.total_words + (createdEntry.word_count || 0),
-        mood_distribution: updateMoodDistribution(prev.mood_distribution, createdEntry.mood, 'increment'),
-        type_distribution: prev.type_distribution.some(item => item.entry_type === createdEntry.entry_type)
-          ? prev.type_distribution.map(item => 
-              item.entry_type === createdEntry.entry_type 
-                ? { ...item, count: item.count + 1 } 
-               : item
-            )
-          : [...prev.type_distribution, { entry_type: createdEntry.entry_type, count: 1 }]
-      }));
-      
-      return createdEntry;
+      toast.success('Entry updated successfully');
+      return updatedEntry;
       
     } catch (err) {
-      console.error('Error creating entry:', err);
-      setError('Failed to create entry. Please try again.');
+      console.error('Error updating entry:', err);
+      // If the API call fails, revert to the previous state
+      setEntries(previousEntries);
+      setStats(previousStats);
+      toast.error('Failed to update entry. Please try again.');
       throw err;
+    }
+  };
+  
+  const handleNewEntry = async (entryData: Omit<JournalEntry, 'id' | 'created_at' | 'updated_at'>) => {
+    if (!token) return;
+    
+    try {
+      const now = new Date().toISOString();
+      let savedEntry: JournalEntry;
+
+      if (editingEntry) {
+        // Update existing entry
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/entries/${editingEntry.id}/`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              ...entryData,
+              updated_at: now,
+            }),
+          }
+        );
+
+        if (!response.ok) throw new Error('Failed to update entry');
+        
+        savedEntry = await response.json();
+        
+        setEntries(prevEntries => 
+          prevEntries.map(entry => 
+            entry.id === editingEntry.id ? { ...entry, ...savedEntry } : entry
+          )
+        );
+        setEditingEntry(null);
+      } else {
+        // Create new entry
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/entries/`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              ...entryData,
+              created_at: now,
+              updated_at: now,
+            }),
+          }
+        );
+
+        if (!response.ok) throw new Error('Failed to create entry');
+        
+        savedEntry = await response.json();
+        setEntries(prevEntries => [savedEntry, ...prevEntries]);
+      }
+      
+      toast.success(`Entry ${editingEntry ? 'updated' : 'created'} successfully`);
+    } catch (error) {
+      console.error('Error saving entry:', error);
+      toast.error(`Failed to ${editingEntry ? 'update' : 'create'} entry. Please try again.`);
+      throw error;
+    } finally {
+      setShowNewEntryForm(false);
     }
   };
 
@@ -190,27 +445,46 @@ function JournalPage() {
     return newDistribution;
   };
 
-  // Fetch journal entries from API
-  const fetchEntries = async () => {
-    if (!token) return;
+  // Fetch journal entries from API with request cancellation support
+  const fetchEntries = async (signal?: AbortSignal) => {
+    if (!token) {
+      console.error('No authentication token available');
+      setError('Authentication required. Please sign in again.');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
     
     try {
-      setLoading(true);
-      const response = await fetch('http://localhost:8000/api/entries/', {
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/entries/`;
+      const response = await fetch(apiUrl, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        signal,
       });
+      
+      // Check if the request was aborted
+      if (signal?.aborted) return;
+      
+      // Handle authentication errors
+      if (response.status === 401) {
+        console.error('Authentication failed, refreshing page...');
+        window.location.reload();
+        return;
+      }
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('API Error:', errorData);
-        throw new Error(`Failed to fetch journal entries: ${response.status} ${response.statusText}`);
+        throw new Error(errorData.detail || `Failed to fetch journal entries: ${response.status} ${response.statusText}`);
       }
       
       const data = await response.json();
-      console.log('API Response:', data);
+      
+      // Check again if the request was aborted after getting the data
+      if (signal?.aborted) return;
       
       // Handle different response formats
       const entries = Array.isArray(data) ? data : data.results || data.entries || [];
@@ -237,8 +511,16 @@ function JournalPage() {
       });
       
     } catch (err) {
-      setError('Failed to load journal entries. Please try again.');
+      // Don't show error if the request was aborted
+      if (err.name === 'AbortError') return;
+      
       console.error('Error loading journal entries:', err);
+      setError(err.message || 'Failed to load journal entries. Please try again.');
+      
+      // Show error toast
+      toast.error(err.message || 'Failed to load journal entries', {
+        duration: 5000,
+      });
     } finally {
       setLoading(false);
     }
@@ -247,14 +529,60 @@ function JournalPage() {
   // Effects
   useEffect(() => {
     // Get token from localStorage
-    const tokens = localStorage.getItem('authTokens');
-    const authToken = tokens ? JSON.parse(tokens).access : null;
-    setToken(authToken);
+    const getTokenFromStorage = () => {
+      try {
+        const tokens = localStorage.getItem('authTokens');
+        if (!tokens) return null;
+        
+        const parsedTokens = JSON.parse(tokens);
+        const authToken = parsedTokens?.access || null;
+        
+        // If we have a token in state that's different from storage, update it
+        if (authToken && authToken !== token) {
+          setToken(authToken);
+        }
+        
+        return authToken;
+      } catch (err) {
+        console.error('Error parsing auth tokens:', err);
+        return null;
+      }
+    };
     
+    const authToken = getTokenFromStorage();
+    
+    // Only fetch entries if we have a valid token and the user is authenticated
     if (isAuthenticated && authToken) {
-      fetchEntries();
+      // Abort any existing request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      
+      const fetchData = async () => {
+        try {
+          await fetchEntries(controller.signal);
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            console.error('Error fetching entries:', err);
+            setError('Failed to load journal entries');
+          }
+        }
+      };
+      
+      fetchData();
+      
+      return () => {
+        controller.abort();
+      };
+    } else if (!isAuthenticated) {
+      // If user is not authenticated, clear the entries
+      setEntries([]);
+      setError('Please sign in to view your journal entries');
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, token]);
 
 
   
@@ -332,17 +660,28 @@ function JournalPage() {
               <span>← Back to Entries</span>
             )}
           </Button>
-          <Button onClick={() => setShowNewEntryForm(true)}>
-            <Plus className="mr-2 h-4 w-4" /> New Entry
-          </Button>
+          <div className="flex space-x-2">
+            <Button variant="outline" onClick={handleDeleteAllEntries} disabled={loading}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              {loading ? 'Deleting...' : 'Delete All Entries'}
+            </Button>
+            <Button onClick={() => setShowNewEntryForm(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Entry
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* New Entry Form Modal */}
       <NewEntryForm 
         open={showNewEntryForm}
-        onClose={() => setShowNewEntryForm(false)} 
+        onClose={() => {
+          setShowNewEntryForm(false);
+          setEditingEntry(null);
+        }}
         onNewEntry={handleNewEntry}
+        initialData={editingEntry || undefined}
       />
 
       {activeTab === 'entries' ? (
@@ -398,29 +737,34 @@ function JournalPage() {
           ) : (
             // Main Content
             <div className="space-y-6">
-              {filteredEntries.length > 0 ? (
-                <JournalEntriesList 
-                  entries={filteredEntries} 
-                  onDelete={handleDeleteEntry} 
-                />
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-muted-foreground">
-                    {searchQuery 
-                      ? 'No entries match your search.' 
-                      : 'No entries yet. Start by creating your first journal entry.'
-                    }
-                  </p>
-                  {!searchQuery && (
-                    <Button 
-                      className="mt-4" 
-                      onClick={() => setShowNewEntryForm(true)}
-                    >
-                      <Plus className="mr-2 h-4 w-4" /> New Entry
-                    </Button>
-                  )}
-                </div>
-              )}
+              <div className="flex-1 overflow-auto">
+                {filteredEntries.length > 0 ? (
+                  <JournalEntriesList 
+                    entries={filteredEntries} 
+                    onDelete={handleDeleteEntry}
+                    onUpdate={handleUpdateEntry}
+                    loading={loading}
+                    error={error}
+                  />
+                ) : (
+                  <div className="text-center py-12">
+                    <p className="text-muted-foreground">
+                      {searchQuery 
+                        ? 'No entries match your search.' 
+                        : 'No entries yet. Start by creating your first journal entry.'
+                      }
+                    </p>
+                    {!searchQuery && (
+                      <Button 
+                        className="mt-4" 
+                        onClick={() => setShowNewEntryForm(true)}
+                      >
+                        <Plus className="mr-2 h-4 w-4" /> New Entry
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* Stats Section */}
               <div className="grid md:grid-cols-2 gap-6">

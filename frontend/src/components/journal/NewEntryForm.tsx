@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { FieldValues } from 'react-hook-form';
@@ -85,23 +85,55 @@ interface NewEntryFormProps {
   onClose: () => void;
   onNewEntry: (entry: Omit<FormValues, 'tags'> & { word_count: number }) => Promise<void>;
   open: boolean;
+  initialData?: {
+    id?: number;
+    title: string;
+    content: string;
+    mood: string;
+    entry_type: string;
+    is_private: boolean;
+    tags?: string[];
+  };
 }
 
-export function NewEntryForm({ onClose, onNewEntry, open }: NewEntryFormProps) {
+export function NewEntryForm({ onClose, onNewEntry, open, initialData }: NewEntryFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { isAuthenticated } = useAuth();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      title: '',
-      content: '',
-      mood: '😐', // Default to neutral emoji
-      entry_type: 'text',
-      is_private: true,
-      tags: '',
+      title: initialData?.title || '',
+      content: initialData?.content || '',
+      mood: initialData?.mood || '😐',
+      entry_type: initialData?.entry_type || 'text',
+      is_private: initialData?.is_private ?? true,
+      tags: initialData?.tags?.join(', ') || '',
     },
   });
+
+  // Reset form when initialData changes
+  useEffect(() => {
+    if (initialData) {
+      form.reset({
+        title: initialData.title,
+        content: initialData.content,
+        mood: initialData.mood,
+        entry_type: initialData.entry_type,
+        is_private: initialData.is_private,
+        tags: initialData.tags?.join(', ') || '',
+      });
+    } else {
+      form.reset({
+        title: '',
+        content: '',
+        mood: '😐',
+        entry_type: 'text',
+        is_private: true,
+        tags: '',
+      });
+    }
+  }, [initialData, open]);
 
   const onSubmit = async (data: FormValues) => {
     if (!isAuthenticated) {
@@ -137,7 +169,7 @@ export function NewEntryForm({ onClose, onNewEntry, open }: NewEntryFormProps) {
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>New Journal Entry</DialogTitle>
+          <DialogTitle>{initialData ? 'Edit Journal Entry' : 'New Journal Entry'}</DialogTitle>
           <DialogDescription>
             Write about your thoughts, feelings, or experiences.
           </DialogDescription>
