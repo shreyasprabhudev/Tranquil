@@ -38,7 +38,7 @@ Tranquil is a modern, AI-powered journaling application designed to help users r
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/tranquil.git
+   git clone https://github.com/shreyasprabhudev/tranquil.git
    cd tranquil
    ```
 
