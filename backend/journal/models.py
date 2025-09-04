@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+import uuid
 
 class UserManager(BaseUserManager):
     """Custom user model manager where email is the unique identifier"""
@@ -76,12 +77,52 @@ class JournalEntry(models.Model):
     class Meta:
         ordering = ['-created_at']
         verbose_name_plural = 'Journal Entries'
-
+        
     def __str__(self):
         return f"{self.user.username}'s entry on {self.created_at.strftime('%Y-%m-%d')}"
 
+
+class Conversation(models.Model):
+    """Model representing a conversation thread."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='conversations')
+    title = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_archived = models.BooleanField(default=False)
+    
+    class Meta:
+        ordering = ['-updated_at']
+        
+    def __str__(self):
+        return f"{self.title or 'Untitled'} - {self.user.username}"
+    
     def save(self, *args, **kwargs):
-        # Update word count before saving
-        self.word_count = len(self.content.split())
+        if not self.title and hasattr(self, 'messages'):
+            # Auto-generate title from first message if not provided
+            first_msg = self.messages.first()
+            if first_msg:
+                self.title = first_msg.content[:50] + ('...' if len(first_msg.content) > 50 else '')
         super().save(*args, **kwargs)
-        return f"{self.title} - {self.user.username}"
+
+
+class Message(models.Model):
+    """Model representing a message in a conversation."""
+    ROLE_CHOICES = [
+        ('user', 'User'),
+        ('assistant', 'Assistant'),
+        ('system', 'System'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    content = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now)
+    metadata = models.JSONField(default=dict, blank=True)  # For storing additional data like tokens, etc.
+    
+    class Meta:
+        ordering = ['created_at']
+        
+    def __str__(self):
+        return f"{self.role}: {self.content[:30]}..."

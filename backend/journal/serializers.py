@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.validators import UniqueValidator
 from django.core.validators import RegexValidator
-from .models import JournalEntry
+from .models import JournalEntry, Conversation, Message
 from typing import Optional, Dict, List, Any
 
 User = get_user_model()
@@ -81,18 +81,53 @@ class UserSerializer(serializers.ModelSerializer):
         
         return user
 
+class MessageSerializer(serializers.ModelSerializer):
+    """Serializer for Message model."""
+    class Meta:
+        model = Message
+        fields = ['id', 'role', 'content', 'created_at', 'metadata']
+        read_only_fields = ['id', 'created_at']
+
+class ConversationListSerializer(serializers.ModelSerializer):
+    """Serializer for listing conversations with basic info."""
+    message_count = serializers.IntegerField(source='messages.count', read_only=True)
+    last_message = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Conversation
+        fields = ['id', 'title', 'created_at', 'updated_at', 'is_archived', 'message_count', 'last_message']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'message_count', 'last_message']
+    
+    def get_last_message(self, obj):
+        last_msg = obj.messages.last()
+        if last_msg:
+            return {
+                'content': last_msg.content[:100] + ('...' if len(last_msg.content) > 100 else ''),
+                'role': last_msg.role,
+                'created_at': last_msg.created_at
+            }
+        return None
+
+class ConversationDetailSerializer(serializers.ModelSerializer):
+    """Serializer for conversation details with messages."""
+    messages = MessageSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Conversation
+        fields = ['id', 'title', 'created_at', 'updated_at', 'is_archived', 'messages']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'messages']
+
 class ConversationSerializer(serializers.Serializer):
-    """Serializer for LLM conversation messages."""
+    """Legacy serializer for LLM conversation messages."""
     message = serializers.CharField(
         required=True,
         allow_blank=False,
         max_length=2000,
         help_text="The message to send to the LLM"
     )
-    
+
     class Meta:
         fields = ['message']
-
 
 class JournalEntrySerializer(serializers.ModelSerializer):
     """Serializer for JournalEntry model with validation and custom methods."""

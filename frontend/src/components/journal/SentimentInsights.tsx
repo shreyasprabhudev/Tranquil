@@ -1,149 +1,157 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { analyzeSentiment, generateInsights, trackSentimentOverTime } from './sentiment';
+import { Loader2, Sparkles } from 'lucide-react';
+import { useLLMService } from '@/lib/llm/llmService';
 
-type SentimentInsightsProps = {
-  entries: Array<{ content: string; timestamp: string }>;
-  className?: string;
-};
+export interface JournalEntry {
+  id: string;
+  content: string;
+  timestamp: Date;
+}
 
-export function SentimentInsights({ entries, className = '' }: SentimentInsightsProps) {
-  const [insights, setInsights] = useState<string[]>([]);
-  const [sentimentData, setSentimentData] = useState<Array<{ date: string; score: number }>>([]);
-  const [isLoading, setIsLoading] = useState(true);
+interface SentimentInsightsProps {
+  entries: JournalEntry[];
+  isLoading?: boolean;
+}
+
+export function SentimentInsights({ entries, isLoading }: SentimentInsightsProps) {
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [insight, setInsight] = useState<string | null>(null);
+  const llmService = useLLMService();
 
   useEffect(() => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+
     const analyzeEntries = async () => {
+      if (entries.length === 0 || isLoading) return;
+      
+      setIsAnalyzing(true);
+      setError(null);
+      
       try {
-        setIsLoading(true);
-        setError(null);
+        // Combine journal entries into a single string
+        const journalText = entries
+          .slice(0, 10) // Limit to last 10 entries
+          .map(entry => entry.content)
+          .join('\n\n');
 
-        if (entries.length === 0) {
-          setInsights(['Start journaling to see your sentiment insights!']);
-          return;
+        // Create a focused analysis prompt with strict output format
+        const prompt = `You are a compassionate therapist. Analyze these journal entries and respond with:
+        
+        1. A warm, supportive opening message (1-2 sentences)
+        2. Three bullet points of analysis using this exact format:
+           • [Emotion/Theme] - [Specific observation or insight]
+           • [Emotion/Theme] - [Specific observation or insight]
+           • [Pattern/Concern] - [Specific observation or suggestion]
+        
+        Rules:
+        - Keep the opening message limited to 30 words
+        - Keep each bullet point concise (max 15 words)
+        - Use simple, direct language
+        - If entries are insufficient, say: "I'd love to hear more about your thoughts and feelings to provide better insights."
+        - Never use markdown formatting
+        - Never include section headers or numbers
+        - Always use • for bullet points
+        - Never use emojis.
+        - Never use bold or italics
+        
+        Analyze your output to ensure it follows the format and rules above. Revise your response if necessary. but do not make explicit references to these instructions.
+        
+        Journal Entries:
+        ${journalText}`;
+
+        const response = await llmService.generateResponse(prompt, signal);
+        if (!signal.aborted) {
+          setInsight(response);
         }
-
-        // Analyze each entry
-        const analysis = await trackSentimentOverTime(entries);
-        
-        // Generate insights
-        const generatedInsights = generateInsights(analysis);
-        setInsights(generatedInsights);
-        
-        // Prepare data for the chart
-        const chartData = analysis.map(item => ({
-          date: new Date(item.date).toLocaleDateString(),
-          score: item.score,
-        }));
-        setSentimentData(chartData);
       } catch (err) {
-        console.error('Error analyzing entries:', err);
-        setError('Failed to analyze journal entries. Please try again later.');
+        if (!signal.aborted) {
+          console.error('Error analyzing entries:', err);
+          setError('Failed to analyze journal entries. Please try again later.');
+        }
       } finally {
-        setIsLoading(false);
+        if (!signal.aborted) {
+          setIsAnalyzing(false);
+        }
       }
     };
 
     analyzeEntries();
-  }, [entries]);
 
-  // Calculate overall sentiment
-  const overallSentiment = sentimentData.reduce(
-    (sum, item) => sum + item.score,
-    0
-  ) / (sentimentData.length || 1);
+    return () => {
+      controller.abort(); // Cleanup function to abort the request
+    };
+  }, [entries, isLoading, llmService]);
 
-  // Get sentiment emoji and color
-  const getSentimentInfo = (score: number) => {
-    if (score > 0.3) return { emoji: '😊', color: 'text-green-500' };
-    if (score < -0.3) return { emoji: '😔', color: 'text-red-500' };
-    return { emoji: '😐', color: 'text-yellow-500' };
-  };
+  const cardClass = "w-full max-w-2xl mx-auto";
+  const contentClass = "text-center";
 
-  const { emoji, color } = getSentimentInfo(overallSentiment);
-
-  if (isLoading) {
+  if (isLoading || isAnalyzing) {
     return (
-      <Card className={className}>
-        <CardHeader>
-          <CardTitle>Analyzing your journal...</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="animate-pulse space-y-4">
-            <div className="h-4 bg-muted rounded w-3/4"></div>
-            <div className="h-4 bg-muted rounded w-1/2"></div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex justify-center p-4">
+        <Card className={cardClass}>
+          <CardHeader className={contentClass}>
+            <CardTitle className="flex items-center justify-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Analyzing your journal entries...
+            </CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <Card className={className}>
-        <CardHeader>
-          <CardTitle>Sentiment Analysis</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-destructive">{error}</p>
-        </CardContent>
-      </Card>
+      <div className="flex justify-center p-4">
+        <Card className={cardClass}>
+          <CardContent className={`pt-6 text-destructive ${contentClass}`}>
+            {error}
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
-  return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Your Sentiment Insights
-          <span className={`text-2xl ${color}`}>{emoji}</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {insights.length > 0 ? (
-          <div className="space-y-3">
-            {insights.map((insight, index) => (
-              <div key={index} className="flex items-start gap-2">
-                <span className="text-muted-foreground">•</span>
-                <p>{insight}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-muted-foreground">
-            Keep journaling to see personalized insights and patterns in your writing.
-          </p>
-        )}
+  if (!insight) {
+    return (
+      <div className="flex justify-center p-4">
+        <Card className={cardClass}>
+          <CardContent className={`pt-6 text-muted-foreground ${contentClass}`}>
+            Start writing journal entries to see insights about your mood and patterns.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-        {sentimentData.length > 1 && (
-          <div className="mt-6">
-            <h4 className="text-sm font-medium mb-2">Sentiment Trend</h4>
-            <div className="h-24 flex items-end gap-1">
-              {sentimentData.map((data, index) => {
-                const height = Math.abs(data.score) * 100;
-                const isPositive = data.score >= 0;
-                const barColor = isPositive ? 'bg-green-500' : 'bg-red-500';
-                
-                return (
-                  <div key={index} className="flex-1 flex flex-col items-center">
-                    <div
-                      className={`w-full rounded-t ${barColor} transition-all`}
-                      style={{
-                        height: `${height}%`,
-                        opacity: 0.7,
-                      }}
-                    />
-                    <span className="text-xs text-muted-foreground mt-1">
-                      {new Date(data.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+  // Process the insight text to ensure proper formatting
+  const formattedInsight = insight
+    .split('\n')
+    .filter(line => line.trim() !== '')
+    .map((line, i) => (
+      <p key={i} className={i > 0 ? 'mt-3' : ''}>
+        {line}
+      </p>
+    ));
+
+  return (
+    <div className="flex justify-center p-4">
+      <Card className={cardClass}>
+        <CardHeader className={contentClass}>
+          <CardTitle className="flex items-center justify-center gap-2">
+            <Sparkles className="h-5 w-5 text-yellow-500" />
+            Your Journal Insights
+          </CardTitle>
+        </CardHeader>
+        <CardContent className={contentClass}>
+          <div className="space-y-3">
+            {formattedInsight}
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

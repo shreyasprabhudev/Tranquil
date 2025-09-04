@@ -8,8 +8,6 @@ import { Plus, Search, BarChart3, RotateCw } from "lucide-react"
 import { JournalEntriesList } from "@/components/journal/JournalEntriesList"
 import { NewEntryForm } from "@/components/journal/NewEntryForm"
 import { SentimentInsights } from "@/components/journal/SentimentInsights"
-import { usePromptGenerator } from "@/components/journal/PromptGenerator"
-import { ChatInterface } from "@/components/journal/ChatInterface"
 import { useAuth } from '@/contexts/AuthContext';
 
 // Types
@@ -59,13 +57,6 @@ export default function JournalPage() {
       fetchEntries();
     }
   }, [token]);
-  
-  // Initialize prompt generator
-  const { 
-    currentPrompt, 
-    generatePrompt, 
-    isLoading: isGeneratingPrompt 
-  } = usePromptGenerator();
   
   // Derived state
   const [stats, setStats] = useState<JournalStats>({
@@ -260,16 +251,8 @@ export default function JournalPage() {
       fetchEntries();
     }
   }, [isAuthenticated]);
-  
-  // Generate a new prompt when the component mounts
-  useEffect(() => {
-    if (isAuthenticated && token) {
-      generatePrompt({
-        recentEntry: entries[0]?.content,
-        timeOfDay: getTimeOfDay(),
-      });
-    }
-  }, [isAuthenticated, token]);
+
+
   
   // Helper function to get time of day
   const getTimeOfDay = (): 'morning' | 'afternoon' | 'evening' => {
@@ -279,11 +262,13 @@ export default function JournalPage() {
     return 'evening';
   };
   
-  // Prepare entries for sentiment analysis
-  const entriesForSentiment = entries.map(entry => ({
-    content: entry.content,
-    timestamp: entry.created_at
-  }));
+  // Prepare entries for sentiment analysis (using only the 10 most recent entries)
+  const entriesForSentiment = entries
+    .slice(0, 10)
+    .map(entry => ({
+      content: entry.content,
+      timestamp: entry.created_at
+    }));
 
   if (loading && entries.length === 0) {
     return (
@@ -360,14 +345,10 @@ export default function JournalPage() {
         <div className="space-y-6">
           {/* Sentiment Insights Card */}
           {!loading && entries.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Your Sentiment Insights</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <SentimentInsights entries={entriesForSentiment} />
-              </CardContent>
-            </Card>
+            <SentimentInsights 
+              entries={entriesForSentiment} 
+              className="w-full"
+            />
           )}
           <div className="flex flex-col md:flex-row gap-4 w-full">
             {/* Search Bar */}
@@ -380,26 +361,6 @@ export default function JournalPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            
-            {/* Prompt Suggestion */}
-            {currentPrompt && (
-              <div className="flex items-center gap-2 bg-muted/50 p-2 rounded-lg text-sm text-muted-foreground">
-                <span className="font-medium">Prompt:</span>
-                <span className="flex-1">{currentPrompt}</span>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-6 w-6"
-                  onClick={() => generatePrompt({
-                    recentEntry: entries[0]?.content,
-                    timeOfDay: getTimeOfDay(),
-                  })}
-                  disabled={isGeneratingPrompt}
-                >
-                  <RotateCw className={`h-3.5 w-3.5 ${isGeneratingPrompt ? 'animate-spin' : ''}`} />
-                </Button>
-              </div>
-            )}
           </div>
 
           {/* Loading State */}

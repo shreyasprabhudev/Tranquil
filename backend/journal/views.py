@@ -5,15 +5,23 @@ from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from rest_framework import status
 import logging
-from .models import JournalEntry
-from .serializers import JournalEntrySerializer, UserSerializer, ConversationSerializer
+from .models import JournalEntry, Conversation, Message
+from .serializers import (
+    JournalEntrySerializer, 
+    UserSerializer, 
+    ConversationSerializer,
+    ConversationListSerializer,
+    ConversationDetailSerializer,
+    MessageSerializer
+)
 from .services.llm import LLMService
 from datetime import datetime, timedelta
 
 # Initialize LLM service
 llm_service = LLMService(model_name="phi3")
 
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework import generics, filters
 from rest_framework.pagination import PageNumberPagination
 from django.db.models import Q, Sum
 from datetime import datetime, timedelta
@@ -203,6 +211,72 @@ class LLMConversationView(APIView):
                 {"error": "Failed to clear conversation history"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ConversationViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing conversations and messages.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return ConversationDetailSerializer
+        return ConversationListSerializer
+    
+    def get_queryset(self):
+        """Return conversations for the current user."""
+        queryset = Conversation.objects.filter(user=self.request.user)
+        
+        # Filter by archived status if provided
+        is_archived = self.request.query_params.get('archived')
+        if is_archived is not None:
+            queryset = queryset.filter(is_archived=is_archived.lower() == 'true')
+            
+        return queryset.order_by('-updated_at')
+    
+    def perform_create(self, serializer):
+        """Set the user to the current user when creating a conversation."""
+        serializer.save(user=self.request.user)
+    
+    @action(detail=True, methods=['get'])
+    def messages(self, request, pk=None):
+        """Get messages for a specific conversation."""
+        conversation = self.get_object()
+        messages = conversation.messages.all().order_by('created_at')
+        serializer = MessageSerializer(messages, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        """Archive or unarchive a conversation."""
+        conversation = self.get_object()
+        conversation.is_archived = not conversation.is_archived
+        conversation.save()
+        return Response({'status': 'conversation archived' if conversation.is_archived else 'conversation unarchived'})
+
+
+class MessageViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing messages within conversations.
+    """
+    serializer_class = MessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return messages for the current user's conversations."""
+        return Message.objects.filter(
+            conversation__user=self.request.user
+        ).order_by('created_at')
+    
+    def perform_create(self, serializer):
+        """Set the role to 'user' when creating a message."""
+        conversation_id = self.request.data.get('conversation')
+        conversation = Conversation.objects.get(id=conversation_id, user=self.request.user)
+        serializer.save(role='user', conversation=conversation)
+        
+        # Update conversation's updated_at timestamp
+        conversation.save()
 
 
 class RegisterView(APIView):

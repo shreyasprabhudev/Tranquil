@@ -141,7 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       setUser(user);
       setIsAuthenticated(true);
-      router.push('/dashboard');
+      router.push('/chat');
       return { success: true };
     } catch (err) {
       const error = err as Error;
