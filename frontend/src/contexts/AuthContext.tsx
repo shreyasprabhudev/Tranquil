@@ -21,6 +21,7 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   clearError: () => void;
+  token: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -42,6 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       
       const tokens = JSON.parse(tokensStr);
+      setToken(tokens.access);
       
       // Verify token is still valid
       const userResponse = await fetch('http://localhost:8000/api/user/me/', {
@@ -116,6 +119,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Handle successful login
       const { access, refresh, user: userData } = responseData;
+      
+      // Set the token in state
+      setToken(access);
       
       if (!access || !refresh || !userData) {
         throw new Error('Invalid response from server');
@@ -254,7 +260,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated,
         loading,
         error,
-        clearError
+        clearError,
+        token,
       }}
     >
       {!loading && children}

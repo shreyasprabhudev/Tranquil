@@ -4,6 +4,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework.validators import UniqueValidator
 from django.core.validators import RegexValidator
 from .models import JournalEntry
+from typing import Optional, Dict, List, Any
 
 User = get_user_model()
 
@@ -79,6 +80,19 @@ class UserSerializer(serializers.ModelSerializer):
         )
         
         return user
+
+class ConversationSerializer(serializers.Serializer):
+    """Serializer for LLM conversation messages."""
+    message = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        max_length=2000,
+        help_text="The message to send to the LLM"
+    )
+    
+    class Meta:
+        fields = ['message']
+
 
 class JournalEntrySerializer(serializers.ModelSerializer):
     """Serializer for JournalEntry model with validation and custom methods."""

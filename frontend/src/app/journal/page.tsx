@@ -9,6 +9,7 @@ import { JournalEntriesList } from "@/components/journal/JournalEntriesList"
 import { NewEntryForm } from "@/components/journal/NewEntryForm"
 import { SentimentInsights } from "@/components/journal/SentimentInsights"
 import { usePromptGenerator } from "@/components/journal/PromptGenerator"
+import { ChatInterface } from "@/components/journal/ChatInterface"
 import { useAuth } from '@/contexts/AuthContext';
 
 // Types
@@ -31,11 +32,11 @@ type JournalStats = {
   type_distribution: { entry_type: string; count: number }[];
 };
 
-type TabType = 'entries' | 'insights';
+type TabType = 'entries' | 'insights' | 'chat';
 
 export default function JournalPage() {
   // State
-  const [activeTab, setActiveTab] = useState<TabType>('entries');
+  const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [showNewEntryForm, setShowNewEntryForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [entries, setEntries] = useState<JournalEntry[]>([]);

@@ -3,8 +3,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
+from rest_framework import status
+import logging
 from .models import JournalEntry
-from .serializers import JournalEntrySerializer, UserSerializer
+from .serializers import JournalEntrySerializer, UserSerializer, ConversationSerializer
+from .services.llm import LLMService
+from datetime import datetime, timedelta
+
+# Initialize LLM service
+llm_service = LLMService(model_name="phi3")
 
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -127,9 +134,80 @@ class UserProfileView(APIView):
             'date_joined': user.date_joined,
         })
 
+class LLMConversationView(APIView):
+    """
+    API endpoint for interacting with the LLM for therapeutic conversations.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get conversation history."""
+        try:
+            history = llm_service.get_conversation_history(str(request.user.id))
+            return Response({"conversation": history}, status=status.HTTP_200_OK)
+        except Exception as e:
+            logging.error(f"Error getting conversation history: {str(e)}")
+            return Response(
+                {"error": "Failed to retrieve conversation history"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def post(self, request):
+        """Send a message to the LLM and get a response."""
+        serializer = ConversationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            message = serializer.validated_data['message']
+            
+            # Get recent journal entries for context (last 3 days)
+            recent_entries = JournalEntry.objects.filter(
+                user=request.user,
+                created_at__gte=datetime.now() - timedelta(days=3)
+            ).order_by('-created_at')
+            
+            context = "\n".join([entry.content for entry in recent_entries[:3]])
+            
+            # Start or continue conversation
+            if not llm_service.get_conversation_history(str(request.user.id)):
+                llm_service.start_conversation(str(request.user.id))
+            
+            # Get response from LLM
+            response = llm_service.continue_conversation(
+                user_id=str(request.user.id),
+                message=message,
+                context=context if context else None
+            )
+            
+            return Response({"response": response}, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logging.error(f"Error in LLM conversation: {str(e)}")
+            return Response(
+                {"error": "Failed to process your message. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def delete(self, request):
+        """Clear conversation history."""
+        try:
+            llm_service.clear_conversation_history(str(request.user.id))
+            return Response(
+                {"message": "Conversation history cleared"},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            logging.error(f"Error clearing conversation history: {str(e)}")
+            return Response(
+                {"error": "Failed to clear conversation history"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class RegisterView(APIView):
     permission_classes = [permissions.AllowAny]
-
+    
     def post(self, request):
         logger.info("Registration attempt started")
         User = get_user_model()

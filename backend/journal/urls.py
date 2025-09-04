@@ -9,4 +9,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('register/', views.RegisterView.as_view(), name='register'),
     path('user/me/', views.UserProfileView.as_view(), name='user-profile'),
+    path('conversation/', views.LLMConversationView.as_view(), name='llm-conversation'),
 ]
