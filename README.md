@@ -71,11 +71,11 @@ Tranquil is a modern, AI-powered journaling application designed to help users r
 ### Home Page
 <img width="2003" height="1180" alt="Screenshot 2025-09-04 at 4 00 19 PM" src="https://github.com/user-attachments/assets/3e03c128-26be-4f0d-8a7a-49caf9e2a077" />
 
-### Chat
+### Journal Entry
 <!-- Add dashboard screenshot here -->
 <img width="2019" height="1172" alt="Screenshot 2025-09-04 at 4 00 02 PM" src="https://github.com/user-attachments/assets/e529e1cb-c8d2-4271-95e3-241d50d3f9c4" />
 
-### Journal Entry
+### Chat
 <!-- Add journal entry screenshot here -->
 <img width="2008" height="1133" alt="Screenshot 2025-09-04 at 3 59 47 PM" src="https://github.com/user-attachments/assets/ca9809dd-fd37-42e7-ba95-dc0f913f62c5" />
 
