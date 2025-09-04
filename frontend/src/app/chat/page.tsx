@@ -1,11 +1,15 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
+import { motion } from 'framer-motion';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { TherapistChat } from '@/components/chat/TherapistChat';
 
-export default function ChatPage() {
+function ChatPage() {
     const { isAuthenticated, loading } = useAuth();
     const router = useRouter();
 
@@ -33,5 +37,13 @@ export default function ChatPage() {
         <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white dark:from-slate-900 dark:to-slate-950">
             <TherapistChat />
         </div>
+    );
+}
+
+export default function ProtectedChatPage() {
+    return (
+        <ProtectedRoute>
+            <ChatPage />
+        </ProtectedRoute>
     );
 }

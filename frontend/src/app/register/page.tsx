@@ -31,6 +31,12 @@ export default function RegisterPage() {
       return;
     }
     
+    // Email validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    
     if (!password) {
       setError('Password is required');
       return;
@@ -41,14 +47,25 @@ export default function RegisterPage() {
       return;
     }
     
+    // Password strength validation
     if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+      setError('Password must be at least 8 characters long');
       return;
     }
-
+    
+    if (!/(?=.*[a-z])(?=.*[0-9])/i.test(password)) {
+      setError('Password must contain both letters and numbers');
+      return;
+    }
+    
     try {
-      const result = await register(email, username, password, confirmPassword);
-      if (!result.success) {
+      const result = await register(username, email, password);
+      if (result.success) {
+        // Redirect to the intended URL or default to /chat
+        const redirectTo = sessionStorage.getItem('redirectAfterLogin') || '/chat';
+        sessionStorage.removeItem('redirectAfterLogin');
+        router.push(redirectTo);
+      } else {
         setError(result.error || 'Registration failed');
       }
     } catch (error) {

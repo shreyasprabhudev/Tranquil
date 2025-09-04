@@ -1,14 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button } from "@/components/ui/button"
+import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Loader2, Plus, Search } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Plus, Search, BarChart3, RotateCw } from "lucide-react"
 import { JournalEntriesList } from "@/components/journal/JournalEntriesList"
 import { NewEntryForm } from "@/components/journal/NewEntryForm"
 import { SentimentInsights } from "@/components/journal/SentimentInsights"
-import { useAuth } from '@/contexts/AuthContext';
+import { BarChart3, RotateCw } from "lucide-react"
 
 // Types
 type JournalEntry = {
@@ -32,7 +36,7 @@ type JournalStats = {
 
 type TabType = 'entries' | 'insights' | 'chat';
 
-export default function JournalPage() {
+function JournalPage() {
   // State
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [showNewEntryForm, setShowNewEntryForm] = useState(false);
@@ -553,5 +557,13 @@ export default function JournalPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ProtectedJournalPage() {
+  return (
+    <ProtectedRoute>
+      <JournalPage />
+    </ProtectedRoute>
   );
 }

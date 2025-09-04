@@ -45,16 +45,17 @@ export default function LoginPage() {
     
     try {
       const result = await login(identifier, password);
-      if (result?.success) {
-        // The AuthContext will handle the redirect
-        return;
+      if (result.success) {
+        // Redirect to the intended URL or default to /chat
+        const redirectTo = sessionStorage.getItem('redirectAfterLogin') || '/chat';
+        sessionStorage.removeItem('redirectAfterLogin');
+        router.push(redirectTo);
       } else {
-        setError(result?.error || 'Login failed. Please check your credentials.');
+        setError(result.error || 'Login failed');
       }
     } catch (error) {
-      console.error('Login error:', error);
       const err = error as Error;
-      setError(err.message || 'An unexpected error occurred. Please try again.');
+      setError(err.message || 'An error occurred during login');
     } finally {
       setIsLoading(false);
     }
