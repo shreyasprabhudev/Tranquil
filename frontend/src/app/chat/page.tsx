@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { TherapistChat } from '@/components/chat/TherapistChat';
+import { ConversationProvider } from '@/contexts/ConversationContext';
 
 function ChatPage() {
     const { isAuthenticated, loading } = useAuth();
@@ -35,7 +36,9 @@ function ChatPage() {
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white dark:from-slate-900 dark:to-slate-950">
-            <TherapistChat />
+            <ConversationProvider>
+                <TherapistChat />
+            </ConversationProvider>
         </div>
     );
 }

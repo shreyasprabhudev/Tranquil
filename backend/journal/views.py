@@ -167,7 +167,27 @@ class LLMConversationView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            message = serializer.validated_data['message']
+            message_content = serializer.validated_data['message']
+            
+            # Get or create conversation
+            conversation = Conversation.objects.filter(
+                user=request.user,
+                is_archived=False
+            ).order_by('-updated_at').first()
+            
+            if not conversation:
+                # Create a new conversation if none exists
+                conversation = Conversation.objects.create(
+                    user=request.user,
+                    title=f"Conversation {Conversation.objects.filter(user=request.user).count() + 1}"
+                )
+            
+            # Save user message
+            user_message = Message.objects.create(
+                conversation=conversation,
+                role='user',
+                content=message_content
+            )
             
             # Get recent journal entries for context (last 3 days)
             recent_entries = JournalEntry.objects.filter(
@@ -177,18 +197,28 @@ class LLMConversationView(APIView):
             
             context = "\n".join([entry.content for entry in recent_entries[:3]])
             
-            # Start or continue conversation
+            # Start or continue conversation in LLM service
             if not llm_service.get_conversation_history(str(request.user.id)):
                 llm_service.start_conversation(str(request.user.id))
             
             # Get response from LLM
-            response = llm_service.continue_conversation(
+            response_content = llm_service.continue_conversation(
                 user_id=str(request.user.id),
-                message=message,
+                message=message_content,
                 context=context if context else None
             )
             
-            return Response({"response": response}, status=status.HTTP_200_OK)
+            # Save bot response
+            bot_message = Message.objects.create(
+                conversation=conversation,
+                role='assistant',
+                content=response_content
+            )
+            
+            # Update conversation's updated_at timestamp
+            conversation.save()
+            
+            return Response({"response": response_content}, status=status.HTTP_200_OK)
             
         except Exception as e:
             logging.error(f"Error in LLM conversation: {str(e)}")
